@@ -1,0 +1,261 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Entidades del Dominio Core: Compañía y Empleados ---
+
+// Agregado Raíz: COMPANY
+// Representa la organización que publica posiciones.
+model Company {
+  id          Int        @id @default(autoincrement())
+  name        String     @db.VarChar(150)
+  description String?    @db.Text // Descripción general de la compañía, útil para posiciones.
+  website     String?    @db.VarChar(255) // Sitio web de la compañía
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  employees Employee[] // Empleados de la compañía
+  positions Position[] // Posiciones ofrecidas por la compañía
+
+  @@index([name]) // Índice para búsquedas por nombre
+}
+
+// Entidad: EMPLOYEE (parte del Agregado COMPANY)
+// Representa a un empleado de la compañía, potencialmente un reclutador o entrevistador.
+model Employee {
+  id        Int     @id @default(autoincrement())
+  companyId Int
+  firstName String  @db.VarChar(100)
+  lastName  String  @db.VarChar(100)
+  email     String  @unique @db.VarChar(255) // Email único para login/identificación
+  role      String? @db.VarChar(50) // Ej: 'Recruiter', 'Hiring Manager', 'Interviewer'
+  isActive  Boolean @default(true) // Para desactivar empleados en lugar de borrarlos
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade) // Relación con Compañía
+  interviews Interview[] // Entrevistas realizadas por este empleado
+
+  @@index([companyId])
+  @@index([email])
+}
+
+// --- Entidades del Dominio Core: Flujo de Entrevistas ---
+
+// Agregado Raíz: INTERVIEW_FLOW
+// Define la secuencia de pasos para una entrevista asociada a una posición.
+model InterviewFlow {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(150) // Nombre descriptivo del flujo (ej. "Flujo Estándar Backend")
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps     InterviewStep[] // Pasos que componen este flujo
+  positions Position[]      // Posiciones que usan este flujo
+}
+
+// Entidad: INTERVIEW_TYPE
+// Describe el tipo de una etapa de entrevista (ej. "Screening", "Técnica", "Cultural").
+model InterviewType {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100) // Nombre único del tipo
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps InterviewStep[] // Pasos de entrevista que usan este tipo
+}
+
+// Entidad: INTERVIEW_STEP (parte del Agregado INTERVIEW_FLOW)
+// Representa un paso específico dentro de un flujo de entrevistas.
+model InterviewStep {
+  id              Int     @id @default(autoincrement())
+  interviewFlowId Int
+  interviewTypeId Int
+  name            String  @db.VarChar(150) // Nombre del paso (ej. "Llamada Inicial", "Prueba Técnica Backend")
+  orderIndex      Int     // Orden del paso dentro del flujo
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  interviewFlow InterviewFlow @relation(fields: [interviewFlowId], references: [id], onDelete: Cascade) // Relación con Flujo
+  interviewType InterviewType @relation(fields: [interviewTypeId], references: [id], onDelete: Restrict) // Relación con Tipo de Entrevista
+  interviews    Interview[]   // Entrevistas asociadas a este paso específico
+
+  @@unique([interviewFlowId, orderIndex]) // No puede haber dos pasos con el mismo orden en el mismo flujo
+  @@index([interviewFlowId])
+  @@index([interviewTypeId])
+}
+
+
+// --- Entidades del Dominio Core: Posiciones y Aplicaciones ---
+
+// Agregado Raíz: POSITION
+// Representa una oferta de trabajo publicada por una compañía.
+model Position {
+  id                   Int       @id @default(autoincrement())
+  companyId            Int
+  interviewFlowId      Int
+  title                String    @db.VarChar(200)
+  description          String?   @db.Text // Descripción corta o resumen
+  status               String    @db.VarChar(50) @default("Draft") // Ej: Draft, Open, Closed, Archived
+  isVisible            Boolean   @default(false) // Si es visible públicamente/en el portal de empleo
+  location             String?   @db.VarChar(150) // Ej: "Remoto", "Madrid, España"
+  jobDescription       String?   @db.Text // Descripción detallada del puesto
+  requirements         String?   @db.Text // Requisitos para el puesto
+  responsibilities     String?   @db.Text // Responsabilidades del puesto
+  salaryMin            Decimal?  @db.Decimal(10, 2) // Rango salarial mínimo
+  salaryMax            Decimal?  @db.Decimal(10, 2) // Rango salarial máximo
+  currency             String?   @db.VarChar(3) @default("EUR") // Moneda del salario
+  employmentType       String?   @db.VarChar(50) // Ej: "Full-time", "Part-time", "Contract"
+  benefits             String?   @db.Text // Beneficios ofrecidos
+  companyDescription   String?   @db.Text // Descripción de la compañía (puede sobreescribir la de Company)
+  applicationDeadline  DateTime? // Fecha límite para aplicar
+  contactInfo          String?   @db.VarChar(255) // Información de contacto para la posición
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  company              Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  interviewFlow        InterviewFlow @relation(fields: [interviewFlowId], references: [id], onDelete: Restrict)
+  applications         Application[] // Aplicaciones recibidas para esta posición
+
+  @@index([companyId])
+  @@index([interviewFlowId])
+  @@index([status])
+  @@index([isVisible])
+  @@index([employmentType])
+}
+
+// Agregado Raíz: CANDIDATE
+// Representa a una persona que puede aplicar a posiciones. Mantenemos campos existentes y añadimos relación.
+model Candidate {
+  id              Int      @id @default(autoincrement())
+  firstName       String   @db.VarChar(100)
+  lastName        String   @db.VarChar(100)
+  email           String   @unique @db.VarChar(255)
+  phone           String?  @db.VarChar(20)  // Aumentado tamaño por prefijos internacionales
+  address         String?  @db.VarChar(255) // Aumentado tamaño
+  linkedinProfile String?  @db.VarChar(255) // Añadido campo común
+  githubProfile   String?  @db.VarChar(255) // Añadido campo común
+  portfolioUrl    String?  @db.VarChar(255) // Añadido campo común
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  educations      Education[]
+  workExperiences WorkExperience[]
+  resumes         Resume[]
+  applications    Application[] // Aplicaciones realizadas por este candidato
+}
+
+// Agregado Raíz: APPLICATION
+// Representa la postulación de un candidato a una posición específica.
+model Application {
+  id               Int      @id @default(autoincrement())
+  positionId       Int
+  candidateId      Int
+  applicationDate  DateTime @default(now()) // Fecha en que se recibió la aplicación
+  status           String   @db.VarChar(50) @default("Received") // Ej: Received, Reviewing, Interviewing, Offered, Rejected, Hired
+  source           String?  @db.VarChar(100) // Origen de la aplicación (ej. "LinkedIn", "Referral", "Careers Page")
+  notes            String?  @db.Text // Notas internas sobre la aplicación
+  rejectionReason  String?  @db.Text // Motivo del rechazo (si aplica)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  position         Position    @relation(fields: [positionId], references: [id], onDelete: Cascade) // Si se borra la posición, se borran las aplicaciones
+  candidate        Candidate   @relation(fields: [candidateId], references: [id], onDelete: Cascade) // Si se borra el candidato, se borran sus aplicaciones
+  interviews       Interview[] // Entrevistas asociadas a esta aplicación
+
+  @@unique([positionId, candidateId]) // Un candidato solo puede aplicar una vez a la misma posición
+  @@index([positionId])
+  @@index([candidateId])
+  @@index([status])
+}
+
+// Entidad: INTERVIEW (parte del Agregado APPLICATION)
+// Representa una instancia de entrevista específica para una aplicación y un paso del flujo.
+model Interview {
+  id              Int      @id @default(autoincrement())
+  applicationId   Int
+  interviewStepId Int
+  employeeId      Int      // El empleado que realiza/registra la entrevista
+  interviewDate   DateTime // Fecha y hora de la entrevista
+  location        String?  @db.VarChar(255) // Ubicación física o enlace a videoconferencia
+  result          String?  @db.VarChar(50) // Ej: "Passed", "Failed", "Pending"
+  score           Int?     // Puntuación numérica (si aplica)
+  notes           String?  @db.Text // Notas detalladas del entrevistador
+  feedbackToCandidate String? @db.Text // Feedback para compartir con el candidato (opcional)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  application     Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade) // Si se borra la aplicación, se borran las entrevistas
+  interviewStep   InterviewStep @relation(fields: [interviewStepId], references: [id], onDelete: Restrict) // No borrar un paso si tiene entrevistas asociadas
+  interviewer     Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict) // No borrar un empleado si tiene entrevistas asociadas
+
+  @@index([applicationId])
+  @@index([interviewStepId])
+  @@index([employeeId])
+  @@index([interviewDate])
+}
+
+
+// --- Entidades de Soporte (Existentes): Educación, Experiencia, CV ---
+// Mantenemos las entidades existentes relacionadas con el Candidato.
+
+model Education {
+  id            Int       @id @default(autoincrement())
+  institution   String    @db.VarChar(150) // Aumentado tamaño
+  title         String    @db.VarChar(250)
+  degree        String?   @db.VarChar(100) // Ej: Bachelor's, Master's
+  fieldOfStudy  String?   @db.VarChar(100) // Ej: Computer Science
+  startDate     DateTime  @db.Date // Usar Date si no se necesita hora
+  endDate       DateTime? @db.Date // Usar Date si no se necesita hora
+  description   String?   @db.Text // Notas adicionales
+  candidateId   Int
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model WorkExperience {
+  id          Int       @id @default(autoincrement())
+  company     String    @db.VarChar(150) // Aumentado tamaño
+  position    String    @db.VarChar(150) // Aumentado tamaño
+  description String?   @db.Text // Ampliado a Text
+  startDate   DateTime  @db.Date
+  endDate     DateTime? @db.Date
+  isCurrent   Boolean   @default(false) // Indicador si es el trabajo actual
+  location    String?   @db.VarChar(150)
+  candidateId Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
+
+model Resume {
+  id          Int       @id @default(autoincrement())
+  filePath    String    @db.VarChar(500) // Path en el sistema de archivos o URL en almacenamiento blob
+  fileType    String    @db.VarChar(50) // Mime type (e.g., 'application/pdf')
+  fileName    String    @db.VarChar(255) // Nombre original del archivo
+  fileSize    Int?      // Tamaño en bytes
+  uploadDate  DateTime  @default(now())
+  candidateId Int
+  isPrimary   Boolean   @default(false) // Para marcar un CV como el principal/preferido
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId])
+}
